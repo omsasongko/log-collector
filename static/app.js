@@ -58,76 +58,66 @@
   });
 
   // -----------------------------------------------------------------
-  // Fully local SVG line chart. No CDN, no Chart.js dependency.
-  // Click a point -> drill down to that day/week/month and refresh IP codes.
+  // SVG line chart with multi-shift support.
+  // shift='all' draws 3 lines; single shift draws 1 line.
   // -----------------------------------------------------------------
   const chartWrap = $('trendContainer');
   const svg = $('trendChart');
   if (svg && chartWrap) {
-    let series = [];
-    try { series = JSON.parse(chartWrap.dataset.trend || '[]'); }
-    catch (_) { series = []; }
-    if (!series.length) {
+    const shiftMode = chartWrap.dataset.shift || 'all';
+    let rawTrend;
+    try { rawTrend = JSON.parse(chartWrap.dataset.trend || '{}'); } catch (_) { rawTrend = {}; }
+    const SC = {'1':'#7061e8','2':'#e8a735','3':'#38b87c'};
+    const SN = {'1':'Shift 1','2':'Shift 2','3':'Shift 3'};
+    let sMap = {};
+    if (shiftMode === 'all' && rawTrend && typeof rawTrend === 'object' && !Array.isArray(rawTrend)) sMap = rawTrend;
+    else if (Array.isArray(rawTrend)) sMap[shiftMode] = rawTrend;
+    const allEmpty = Object.values(sMap).every(s => !s || !s.length);
+    if (allEmpty) {
       svg.hidden = true;
       $('trendEmpty').hidden = false;
     } else {
       const NS = 'http://www.w3.org/2000/svg';
-      const W = 900, H = 320, left = 45, right = 16, top = 16, bottom = 64;
-      const pw = W - left - right, ph = H - top - bottom;
-      const maxVal = Math.max(1, ...series.map(p => Number(p.count)));
-      const niceMax = maxVal > 10 ? Math.ceil(maxVal / 4 / Math.pow(10, Math.floor(Math.log10(maxVal / 4)))) * Math.pow(10, Math.floor(Math.log10(maxVal / 4))) * 4 : Math.ceil(maxVal / 4) * 4 || 4;
-      function el(tag, attrs = {}, text = '') {
-        const n = document.createElementNS(NS, tag);
-        for (const [k, v] of Object.entries(attrs)) n.setAttribute(k, String(v));
-        if (text) n.textContent = text;
-        return n;
-      }
-      const x = index => left + (series.length === 1 ? pw / 2 : (index / (series.length - 1)) * pw);
-      const y = count => top + ph - (count / niceMax) * ph;
-      const short = n => n >= 1e6 ? `${(n / 1e6).toFixed(1)}m` : n >= 1000 ? `${(n / 1000).toFixed(n >= 1e4 ? 0 : 1)}k` : String(Math.round(n));
+      const W = 900, H = 320, L = 45, R = 16, T = 16, B = 64;
+      const pw = W - L - R, ph = H - T - B;
+      function el(tag, a = {}, t = '') { const n = document.createElementNS(NS, tag); for (const [k,v] of Object.entries(a)) n.setAttribute(k, String(v)); if (t) n.textContent = t; return n; }
+      const ref = Object.values(sMap).find(s => s && s.length) || [];
+      const allC = Object.values(sMap).flatMap(s => (s||[]).map(p => Number(p.count)));
+      const mx = Math.max(1, ...allC);
+      const nm = mx > 10 ? Math.ceil(mx/4/Math.pow(10,Math.floor(Math.log10(mx/4))))*Math.pow(10,Math.floor(Math.log10(mx/4)))*4 : Math.ceil(mx/4)*4||4;
+      const xp = i => L + (ref.length === 1 ? pw/2 : (i/(ref.length-1))*pw);
+      const yp = c => T + ph - (Number(c)/nm)*ph;
+      const short = n => n>=1e6?`${(n/1e6).toFixed(1)}m`:n>=1000?`${(n/1000).toFixed(n>=1e4?0:1)}k`:String(Math.round(n));
       const defs = el('defs');
-      const grad = el('linearGradient', {id:'trendGradient', x1:0, x2:0, y1:0, y2:1});
-      grad.append(el('stop',{offset:'0%', 'stop-color':'#9584ef', 'stop-opacity':'.28'}));
-      grad.append(el('stop',{offset:'100%', 'stop-color':'#9584ef', 'stop-opacity':'0'}));
-      defs.append(grad); svg.append(defs);
-      for (let i = 0; i <= 4; i++) {
-        const val = niceMax * i / 4;
-        const yy = y(val);
-        svg.append(el('line',{x1:left,y1:yy,x2:W-right,y2:yy,class:'grid-line'}));
-        svg.append(el('text',{x:left-10,y:yy+4,'text-anchor':'end',class:'tick'},short(val)));
-      }
-      const points = series.map((p,i) => [x(i), y(Number(p.count))]);
-      const line = points.map(([px,py],i) => `${i?'L':'M'}${px.toFixed(2)},${py.toFixed(2)}`).join(' ');
-      svg.append(el('path',{d:`${line} L${points[points.length-1][0].toFixed(2)},${(top+ph).toFixed(2)} L${points[0][0].toFixed(2)},${(top+ph).toFixed(2)} Z`,class:'trend-area'}));
-      svg.append(el('path',{d:line,class:'trend-line'}));
-      const labelStep = Math.max(2, Math.ceil(series.length / 6));
-      series.forEach((p,i) => {
-        const [px,py] = points[i];
-        if (i % labelStep === 0 || i === series.length-1) {
-          const anchor = i === 0 ? 'start' : i === series.length - 1 ? 'end' : 'middle';
-          svg.append(el('text',{x:px,y:H-18,'text-anchor':anchor,class:'tick'},p.label));
-        }
-        const pointLabel = el('text',{x:px,y:py-26,'text-anchor':'middle',class:'point-label'},'');
-        pointLabel.append(el('tspan',{x:px,dy:0,class:'point-date'},p.label));
-        pointLabel.append(el('tspan',{x:px,dy:'1.25em',class:'point-count'},Number(p.count).toLocaleString()));
-        svg.append(pointLabel);
-        const circle = el('circle',{cx:px,cy:py,r:Math.min(4,series.length>100?2:4),class:'trend-point','aria-label':`${p.label}: ${p.count} prints`,tabindex:'0'});
-        circle.append(el('title',{},`${p.label}\n${Number(p.count).toLocaleString()} prints\nKlik untuk filter tanggal`));
-        const choose = () => {
-          range.value = 'custom';
-          nativeFrom.value = p.start;
-          nativeTo.value = p.end;
-          displayFrom.value = fmtDateInput(new Date(p.start + 'T00:00:00'));
-          displayTo.value = fmtDateInput(new Date(p.end + 'T00:00:00'));
-          form.requestSubmit();
-        };
-        circle.addEventListener('click',choose);
-        circle.addEventListener('keydown',event=>{if(event.key==='Enter'||event.key===' '){event.preventDefault();choose();}});
-        svg.append(circle);
-        const hit = el('circle',{cx:px,cy:py,r:8,class:'hit-point'});
-        hit.append(el('title',{},`${p.label} • ${Number(p.count).toLocaleString()} prints`));
-        hit.addEventListener('click',choose);
-        svg.append(hit);
+      ['1','2','3'].forEach(sk => { const g = el('linearGradient',{id:`shiftGrad${sk}`,x1:0,x2:0,y1:0,y2:1}); g.append(el('stop',{offset:'0%','stop-color':SC[sk],'stop-opacity':'.15'})); g.append(el('stop',{offset:'100%','stop-color':SC[sk],'stop-opacity':'0'})); defs.append(g); });
+      svg.append(defs);
+      for (let i = 0; i <= 4; i++) { const v = nm*i/4, yy = yp(v); svg.append(el('line',{x1:L,y1:yy,x2:W-R,y2:yy,class:'grid-line'})); svg.append(el('text',{x:L-10,y:yy+4,'text-anchor':'end',class:'tick'},short(v))); }
+      const ls = Math.max(2, Math.ceil(ref.length/6));
+      ref.forEach((p,i) => { if (i%ls===0||i===ref.length-1) { const a = i===0?'start':i===ref.length-1?'end':'middle'; svg.append(el('text',{x:xp(i),y:H-18,'text-anchor':a,class:'tick'},p.label)); } });
+      const sKeys = Object.keys(sMap).filter(k => sMap[k]&&sMap[k].length).sort();
+      const isSingle = sKeys.length === 1;
+      sKeys.forEach(sk => {
+        const s = sMap[sk], cls = `shift${sk}`;
+        const pts = s.map((p,i) => [xp(i),yp(Number(p.count))]);
+        const ld = pts.map(([px,py],i)=>`${i?'L':'M'}${px.toFixed(2)},${py.toFixed(2)}`).join(' ');
+        svg.append(el('path',{d:`${ld} L${pts[pts.length-1][0].toFixed(2)},${(T+ph).toFixed(2)} L${pts[0][0].toFixed(2)},${(T+ph).toFixed(2)} Z`,class:`trend-area ${cls}`}));
+        svg.append(el('path',{d:ld,class:`trend-line ${cls}`}));
+      });
+      sKeys.forEach(sk => {
+        const s = sMap[sk], cls = `shift${sk}`, sn = SN[sk]||'';
+        s.forEach((p,i) => {
+          const px = xp(i), py = yp(Number(p.count));
+          if (isSingle && s.length <= 31) { const lb = el('text',{x:px,y:py-26,'text-anchor':'middle',class:'point-label'},''); lb.append(el('tspan',{x:px,dy:0,class:'point-date'},p.label)); lb.append(el('tspan',{x:px,dy:'1.25em',class:'point-count'},Number(p.count).toLocaleString())); svg.append(lb); }
+          const c = el('circle',{cx:px,cy:py,r:Math.min(4,s.length>100?2:4),class:`trend-point ${cls}`,'aria-label':`${sn} ${p.label}: ${p.count}`,tabindex:'0'});
+          c.append(el('title',{},`${sn} • ${p.label}\n${Number(p.count).toLocaleString()} prints`));
+          const choose = () => { range.value='custom'; nativeFrom.value=p.start; nativeTo.value=p.end; displayFrom.value=fmtDateInput(new Date(p.start+'T00:00:00')); displayTo.value=fmtDateInput(new Date(p.end+'T00:00:00')); form.requestSubmit(); };
+          c.addEventListener('click',choose);
+          c.addEventListener('keydown',e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();choose();}});
+          svg.append(c);
+          const h = el('circle',{cx:px,cy:py,r:8,class:'hit-point'});
+          h.append(el('title',{},`${sn} • ${p.label} • ${Number(p.count).toLocaleString()} prints`));
+          h.addEventListener('click',choose); svg.append(h);
+        });
       });
     }
   }

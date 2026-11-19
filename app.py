@@ -124,6 +124,14 @@ def like_prefix(value: str) -> str:
     return escaped + '%'
 
 
+SHIFT_RANGES = {
+    '1': (0, 7),    # 00:00:00 – 07:59:59
+    '2': (8, 15),   # 08:00:00 – 15:59:59
+    '3': (16, 23),  # 16:00:00 – 23:59:59
+}
+SHIFT_LABELS = {'1': 'Shift 1 (00–08)', '2': 'Shift 2 (08–16)', '3': 'Shift 3 (16–24)'}
+
+
 @dataclass(frozen=True)
 class Filters:
     date_from: date | None
@@ -132,6 +140,7 @@ class Filters:
     unique_code: str
     period: str
     range_mode: str
+    shift: str  # 'all', '1', '2', '3'
 
     def params(self, per_page=PER_PAGE):
         return dict(
@@ -140,6 +149,7 @@ class Filters:
             ip_code=self.ip_code,
             unique_code=self.unique_code,
             range=self.range_mode,
+            shift=self.shift,
             per_page=per_page,
         )
 
@@ -167,6 +177,9 @@ def get_filters(args, cur):
         mode = 'custom'
     ip_code = args.get('ip_code', '').strip()[:50]
     unique_code = args.get('unique_code', '').strip()[:100]
+    shift = args.get('shift', 'all')
+    if shift not in {'all', '1', '2', '3'}:
+        shift = 'all'
     if mode in {'1', '7', '30', '90'}:
         yesterday = date.today() - timedelta(days=1)
         if mode == '1':
@@ -198,7 +211,7 @@ def get_filters(args, cur):
     else:
         period = 'day'
 
-    return Filters(start, end, ip_code, unique_code, period, mode)
+    return Filters(start, end, ip_code, unique_code, period, mode, shift)
 
 
 def fmt_date(value):
@@ -214,24 +227,14 @@ def trend_expression(period):
     return 'CONVERT(date, LogDateTime)'
 
 
-def trend_series(cur, filters):
-    """Return date buckets, filling missing dates with zero for honest trend lines."""
-    where, params = filters.conditions()
-    prefix = ' AND ' if where else ' WHERE '
-    expr = trend_expression(filters.period)
-    query(cur, f'''
-        SELECT {expr} AS BucketDate, COUNT_BIG(*) AS PrintCount
-        FROM dbo.vAllLogEntries
-        {where}{prefix}LogDateTime IS NOT NULL
-        GROUP BY {expr}
-        ORDER BY BucketDate ASC
-    ''', params, timeout=120)
-    by_date = {}
-    for row in cur.fetchall():
-        d = row[0].date() if isinstance(row[0], datetime) else row[0]
-        by_date[d] = int(row[1])
-    if not by_date:
-        return []
+def _shift_hour_cond(shift_key):
+    """Return SQL condition for a specific shift (hardcoded, safe)."""
+    lo, hi = SHIFT_RANGES[shift_key]
+    return f'DATEPART(HOUR, LogDateTime) BETWEEN {lo} AND {hi}'
+
+
+def _build_date_buckets(filters, by_date_map):
+    """Generate ordered date bucket dicts from a {date: count} map, filling gaps with 0."""
 
     def align_start(d):
         if filters.period == 'week':
@@ -245,8 +248,8 @@ def trend_series(cur, filters):
             return date(d.year + 1, 1, 1) if d.month == 12 else date(d.year, d.month + 1, 1)
         return d + timedelta(days=7 if filters.period == 'week' else 1)
 
-    begin = align_start(filters.date_from or min(by_date))
-    finish = align_start(filters.date_to or max(by_date))
+    begin = align_start(filters.date_from or min(by_date_map))
+    finish = align_start(filters.date_to or max(by_date_map))
     result = []
     d = begin
     while d <= finish:
@@ -259,11 +262,67 @@ def trend_series(cur, filters):
         else:
             label = d.strftime('%d %b %Y')
         result.append({'label': label, 'start': d.isoformat(), 'end': end.isoformat(),
-                       'count': by_date.get(d, 0)})
+                       'count': by_date_map.get(d, 0)})
         if len(result) >= 2000:
-            break  # keep the SVG manageable for very wide date ranges
+            break
         d = next_date
     return result
+
+
+def trend_series(cur, filters):
+    """Return trend data. When shift='all', returns a dict with keys '1','2','3';
+       otherwise returns a flat list (single series) for the selected shift."""
+    where, params = filters.conditions()
+    prefix = ' AND ' if where else ' WHERE '
+    expr = trend_expression(filters.period)
+
+    if filters.shift == 'all':
+        # Query all three shifts in one pass using CASE grouping
+        query(cur, f'''
+            SELECT {expr} AS BucketDate,
+                   CASE WHEN DATEPART(HOUR, LogDateTime) BETWEEN 0  AND 7  THEN 1
+                        WHEN DATEPART(HOUR, LogDateTime) BETWEEN 8  AND 15 THEN 2
+                        ELSE 3 END AS ShiftNum,
+                   COUNT_BIG(*) AS PrintCount
+            FROM dbo.vAllLogEntries
+            {where}{prefix}LogDateTime IS NOT NULL
+            GROUP BY {expr},
+                     CASE WHEN DATEPART(HOUR, LogDateTime) BETWEEN 0  AND 7  THEN 1
+                          WHEN DATEPART(HOUR, LogDateTime) BETWEEN 8  AND 15 THEN 2
+                          ELSE 3 END
+            ORDER BY BucketDate ASC, ShiftNum ASC
+        ''', params, timeout=120)
+        maps = {'1': {}, '2': {}, '3': {}}
+        for row in cur.fetchall():
+            d = row[0].date() if isinstance(row[0], datetime) else row[0]
+            maps[str(int(row[1]))][d] = int(row[2])
+        # Union all date keys so every shift has the same buckets
+        all_dates = set()
+        for m in maps.values():
+            all_dates.update(m)
+        if not all_dates:
+            return {'1': [], '2': [], '3': []}
+        for sk in maps:
+            for d in all_dates:
+                maps[sk].setdefault(d, 0)
+        return {sk: _build_date_buckets(filters, maps[sk]) for sk in ('1', '2', '3')}
+    else:
+        # Single shift
+        shift_cond = _shift_hour_cond(filters.shift)
+        query(cur, f'''
+            SELECT {expr} AS BucketDate, COUNT_BIG(*) AS PrintCount
+            FROM dbo.vAllLogEntries
+            {where}{prefix}LogDateTime IS NOT NULL AND {shift_cond}
+            GROUP BY {expr}
+            ORDER BY BucketDate ASC
+        ''', params, timeout=120)
+        by_date = {}
+        for row in cur.fetchall():
+            d = row[0].date() if isinstance(row[0], datetime) else row[0]
+            by_date[d] = int(row[1])
+        if not by_date:
+            return []
+        return _build_date_buckets(filters, by_date)
 
 
 def summary(cur, filters):
@@ -340,8 +399,14 @@ def dashboard():
             {'number': n, 'url': url_for('dashboard', **base_args, page=n), 'active': n == page}
             for n in range(max(1, page - 2), min(total_pages, page + 2) + 1)
         ]
+        # trend_length: number of date buckets (same across all shifts)
+        if isinstance(trend, dict):
+            trend_length = max((len(v) for v in trend.values()), default=0)
+        else:
+            trend_length = len(trend)
         return render_template(
             'dashboard.html', filters=filters, stats=stats, trend=trend,
+            trend_length=trend_length,
             ips=ips, rows=rows, page=page, page_links=page_links, total_pages=total_pages,
             per_page=per_page, per_page_options=PER_PAGE_OPTIONS,
             page_start=(page - 1) * per_page + 1 if stats['total'] else 0,
