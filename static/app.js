@@ -123,65 +123,55 @@
   }
 
   // -----------------------------------------------------------------
-  // Hourly distribution chart (jam 00–23), same multi-shift logic.
+  // Hourly Print Analysis — single blue line, date picker via AJAX.
   // -----------------------------------------------------------------
-  const hWrap = $('hourlyContainer');
+  const hSec = $('hourlySection');
   const hSvg = $('hourlyChart');
-  if (hSvg && hWrap) {
-    const hShift = hWrap.dataset.shift || 'all';
-    let hRaw;
-    try { hRaw = JSON.parse(hWrap.dataset.hourly || '{}'); } catch(_){ hRaw = {}; }
-    let hMap = {};
-    if (hShift === 'all' && hRaw && typeof hRaw === 'object' && !Array.isArray(hRaw)) hMap = hRaw;
-    else if (Array.isArray(hRaw)) hMap[hShift] = hRaw;
-    const hEmpty = Object.values(hMap).every(s => !s || !s.length || s.every(p => !p.count));
-    if (hEmpty) { hSvg.hidden = true; $('hourlyEmpty').hidden = false; }
-    else {
-      const NS = 'http://www.w3.org/2000/svg';
-      const W = 900, H = 260, L = 50, R = 16, T = 16, B = 44;
-      const pw = W-L-R, ph = H-T-B;
-      const HC = {'1':'#7061e8','2':'#e8a735','3':'#38b87c'};
-      const HN = {'1':'Shift 1','2':'Shift 2','3':'Shift 3'};
-      function he(tag,a={},t=''){const n=document.createElementNS(NS,tag);for(const[k,v]of Object.entries(a))n.setAttribute(k,String(v));if(t)n.textContent=t;return n;}
-      const allH = Object.values(hMap).flatMap(s=>(s||[]).map(p=>Number(p.count)));
-      const hmx = Math.max(1,...allH);
-      const hnm = hmx>10?Math.ceil(hmx/4/Math.pow(10,Math.floor(Math.log10(hmx/4))))*Math.pow(10,Math.floor(Math.log10(hmx/4)))*4:Math.ceil(hmx/4)*4||4;
-      const hRef = Object.values(hMap).find(s=>s&&s.length) || [];
-      const totalPts = hShift==='all' ? 24 : hRef.length;
-      const short=n=>n>=1e6?`${(n/1e6).toFixed(1)}m`:n>=1000?`${(n/1000).toFixed(n>=1e4?0:1)}k`:String(Math.round(n));
-      // Defs
-      const hd = he('defs');
-      ['1','2','3'].forEach(sk=>{const g=he('linearGradient',{id:`hGrad${sk}`,x1:0,x2:0,y1:0,y2:1});g.append(he('stop',{offset:'0%','stop-color':HC[sk],'stop-opacity':'.15'}));g.append(he('stop',{offset:'100%','stop-color':HC[sk],'stop-opacity':'0'}));hd.append(g);});
-      hSvg.append(hd);
-      // Grid + Y labels
-      for(let i=0;i<=4;i++){const v=hnm*i/4,yy=T+ph-(v/hnm)*ph;hSvg.append(he('line',{x1:L,y1:yy,x2:W-R,y2:yy,class:'grid-line'}));hSvg.append(he('text',{x:L-10,y:yy+4,'text-anchor':'end',class:'tick'},short(v)));}
-      // X labels — all 24 hours or shift range
-      const hKeys = Object.keys(hMap).filter(k=>hMap[k]&&hMap[k].length).sort();
-      if (hShift==='all') {
-        // Merge all shifts into continuous 0-23 for x-axis labels
-        for(let h=0;h<24;h++){const xPos=L+(h/23)*pw;hSvg.append(he('text',{x:xPos,y:H-B+18,'text-anchor':'middle',class:'tick'},`${String(h).padStart(2,'0')}`));}
-      } else {
-        hRef.forEach((p,i)=>{const xPos=L+(hRef.length===1?pw/2:(i/(hRef.length-1))*pw);hSvg.append(he('text',{x:xPos,y:H-B+18,'text-anchor':'middle',class:'tick'},p.label));});
-      }
-      // Draw lines per shift
-      hKeys.forEach(sk=>{
-        const s=hMap[sk], cls=`shift${sk}`;
-        let xFn, len;
-        if(hShift==='all'){xFn=p=>L+(p.hour/23)*pw; len=s.length;}
-        else{len=s.length; xFn=(p,i)=>L+(len===1?pw/2:(i/(len-1))*pw);}
-        const pts=s.map((p,i)=>[hShift==='all'?xFn(p):xFn(p,i), T+ph-(Number(p.count)/hnm)*ph]);
-        const ld=pts.map(([px,py],i)=>`${i?'L':'M'}${px.toFixed(2)},${py.toFixed(2)}`).join(' ');
-        hSvg.append(he('path',{d:`${ld} L${pts[pts.length-1][0].toFixed(2)},${(T+ph).toFixed(2)} L${pts[0][0].toFixed(2)},${(T+ph).toFixed(2)} Z`,class:`trend-area ${cls}`}));
-        hSvg.append(he('path',{d:ld,class:`trend-line ${cls}`}));
-        // Points with tooltip
-        s.forEach((p,i)=>{
-          const[px,py]=pts[i]; const sn=HN[sk]||'';
-          const c=he('circle',{cx:px,cy:py,r:4,class:`trend-point ${cls}`});
-          c.append(he('title',{},`${sn} • ${p.label}\n${Number(p.count).toLocaleString()} prints`));
-          hSvg.append(c);
-        });
-      });
+  if (hSec && hSvg) {
+    const hApi = hSec.dataset.api;
+    let hInitial; try { hInitial = JSON.parse(hSec.dataset.initial||'{}'); } catch(_){ hInitial={}; }
+    const NS='http://www.w3.org/2000/svg';
+    function he(tag,a={},t=''){const n=document.createElementNS(NS,tag);for(const[k,v]of Object.entries(a))n.setAttribute(k,String(v));if(t)n.textContent=t;return n;}
+    const short=n=>n>=1e6?`${(n/1e6).toFixed(1)}m`:n>=1000?`${(n/1000).toFixed(n>=1e4?0:1)}k`:String(Math.round(n));
+    function drawHourly(data){
+      const s=data.series||[]; hSvg.replaceChildren(); $('hourlyEmpty').hidden=s.length>0;
+      hSvg.hidden=!s.length;
+      if(!s.length)return;
+      const W=900,H=280,L=50,R=20,T=20,B=50,pw=W-L-R,ph=H-T-B;
+      const mx=Math.max(1,...s.map(p=>p.count));
+      const nm=mx>10?Math.ceil(mx/4/Math.pow(10,Math.floor(Math.log10(mx/4))))*Math.pow(10,Math.floor(Math.log10(mx/4)))*4:Math.ceil(mx/4)*4||4;
+      const xp=i=>L+(i/23)*pw, yp=c=>T+ph-(c/nm)*ph;
+      const defs=he('defs');
+      const g=he('linearGradient',{id:'hGradB',x1:0,x2:0,y1:0,y2:1});
+      g.append(he('stop',{offset:'0%','stop-color':'#4a90d9','stop-opacity':'.12'}));
+      g.append(he('stop',{offset:'100%','stop-color':'#4a90d9','stop-opacity':'0'}));
+      defs.append(g); hSvg.append(defs);
+      for(let i=0;i<=4;i++){const v=nm*i/4,yy=yp(v);hSvg.append(he('line',{x1:L,y1:yy,x2:W-R,y2:yy,class:'grid-line'}));hSvg.append(he('text',{x:L-10,y:yy+4,'text-anchor':'end',class:'tick'},short(v)));}
+      s.forEach((p,i)=>{if(i%2===1||i===0||i===23)hSvg.append(he('text',{x:xp(i),y:H-B+20,'text-anchor':'middle',class:'tick'},p.label));});
+      const pts=s.map((p,i)=>[xp(i),yp(p.count)]);
+      const ld=pts.map(([px,py],i)=>`${i?'L':'M'}${px.toFixed(1)},${py.toFixed(1)}`).join('');
+      hSvg.append(he('path',{d:`${ld}L${pts[23][0].toFixed(1)},${(T+ph).toFixed(1)}L${pts[0][0].toFixed(1)},${(T+ph).toFixed(1)}Z`,class:'h-area',fill:'url(#hGradB)'}));
+      hSvg.append(he('path',{d:ld,class:'h-line'}));
+      s.forEach((p,i)=>{const[px,py]=pts[i];const c=he('circle',{cx:px,cy:py,r:3.5,class:'h-point'});c.append(he('title',{},`${p.label}\n${Number(p.count).toLocaleString()} prints`));hSvg.append(c);});
+      const ph2=$('peakHour'),pc=$('peakCount'),st=$('hourlyStats');
+      if(ph2)ph2.textContent=data.peak_hour||'—';
+      if(pc)pc.textContent=Number(data.peak_count||0).toLocaleString();
+      if(st&&!st.children.length){st.innerHTML='<div class="hourly-stat"><span class="hourly-stat-label">Peak Hour</span><span class="hourly-stat-value" id="peakHour">'+(data.peak_hour||'—')+'</span></div><div class="hourly-stat"><span class="hourly-stat-label">Print pada jam tersibuk</span><span class="hourly-stat-value" id="peakCount">'+Number(data.peak_count||0).toLocaleString()+'</span></div>';}
     }
+    if(hInitial.series)drawHourly(hInitial);
+    const picker=$('hourlyDatePicker');
+    picker?.addEventListener('change',async()=>{
+      const wrap=$('hourlyContainer');
+      let loader=wrap.querySelector('.hourly-loading');
+      if(!loader){loader=document.createElement('div');loader.className='hourly-loading';loader.textContent='Memuat data…';}
+      wrap.append(loader);
+      try{
+        const r=await fetch(`${hApi}?date=${picker.value}`,{headers:{Accept:'application/json'}});
+        const d=await r.json();if(!r.ok)throw new Error(d.error||'Gagal');
+        drawHourly(d);
+      }catch(e){hSvg.replaceChildren();hSvg.hidden=true;$('hourlyEmpty').hidden=false;$('hourlyEmpty').textContent=e.message;}
+      finally{loader.remove();}
+    });
   }
 
   // -----------------------------------------------------------------

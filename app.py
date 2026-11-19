@@ -325,47 +325,34 @@ def trend_series(cur, filters):
         return _build_date_buckets(filters, by_date)
 
 
-def hourly_series(cur, filters):
-    """Return print count per hour (0–23) for the hourly distribution chart."""
+def hourly_dates(cur, filters):
+    """Return distinct dates within filters for the hourly date-picker dropdown."""
     where, params = filters.conditions()
     prefix = ' AND ' if where else ' WHERE '
+    query(cur, f'''
+        SELECT DISTINCT CONVERT(date, LogDateTime) AS D
+        FROM dbo.vAllLogEntries
+        {where}{prefix}LogDateTime IS NOT NULL
+        ORDER BY D DESC
+    ''', params, timeout=120)
+    return [r[0] if isinstance(r[0], date) else r[0].date() for r in cur.fetchall()]
 
-    if filters.shift == 'all':
-        # All shifts: return {'1': [...], '2': [...], '3': [...]}
-        query(cur, f'''
-            SELECT DATEPART(HOUR, LogDateTime) AS H,
-                   CASE WHEN DATEPART(HOUR, LogDateTime) BETWEEN 0  AND 7  THEN 1
-                        WHEN DATEPART(HOUR, LogDateTime) BETWEEN 8  AND 15 THEN 2
-                        ELSE 3 END AS ShiftNum,
-                   COUNT_BIG(*) AS PrintCount
-            FROM dbo.vAllLogEntries
-            {where}{prefix}LogDateTime IS NOT NULL
-            GROUP BY DATEPART(HOUR, LogDateTime),
-                     CASE WHEN DATEPART(HOUR, LogDateTime) BETWEEN 0  AND 7  THEN 1
-                          WHEN DATEPART(HOUR, LogDateTime) BETWEEN 8  AND 15 THEN 2
-                          ELSE 3 END
-            ORDER BY H ASC
-        ''', params, timeout=120)
-        maps = {'1': {}, '2': {}, '3': {}}
-        for row in cur.fetchall():
-            maps[str(int(row[1]))][int(row[0])] = int(row[2])
-        result = {}
-        for sk, (lo, hi) in SHIFT_RANGES.items():
-            result[sk] = [{'hour': h, 'label': f'{h:02d}:00', 'count': maps[sk].get(h, 0)} for h in range(lo, hi + 1)]
-        return result
-    else:
-        # Single shift
-        lo, hi = SHIFT_RANGES[filters.shift]
-        shift_cond = _shift_hour_cond(filters.shift)
-        query(cur, f'''
-            SELECT DATEPART(HOUR, LogDateTime) AS H, COUNT_BIG(*) AS PrintCount
-            FROM dbo.vAllLogEntries
-            {where}{prefix}LogDateTime IS NOT NULL AND {shift_cond}
-            GROUP BY DATEPART(HOUR, LogDateTime)
-            ORDER BY H ASC
-        ''', params, timeout=120)
-        by_hour = {int(r[0]): int(r[1]) for r in cur.fetchall()}
-        return [{'hour': h, 'label': f'{h:02d}:00', 'count': by_hour.get(h, 0)} for h in range(lo, hi + 1)]
+
+def hourly_for_date(cur, target_date):
+    """Return hourly counts (0–23) for a single date. No other filters applied."""
+    start = datetime.combine(target_date, datetime.min.time())
+    end = datetime.combine(target_date + timedelta(days=1), datetime.min.time())
+    query(cur, '''
+        SELECT DATEPART(HOUR, LogDateTime) AS H, COUNT_BIG(*) AS PrintCount
+        FROM dbo.vAllLogEntries
+        WHERE LogDateTime >= ? AND LogDateTime < ? AND LogDateTime IS NOT NULL
+        GROUP BY DATEPART(HOUR, LogDateTime)
+        ORDER BY H ASC
+    ''', [start, end], timeout=120)
+    by_hour = {int(r[0]): int(r[1]) for r in cur.fetchall()}
+    series = [{'hour': h, 'label': f'{h:02d}:00', 'count': by_hour.get(h, 0)} for h in range(24)]
+    peak = max(series, key=lambda p: p['count'])
+    return {'series': series, 'peak_hour': peak['label'], 'peak_count': peak['count']}
 
 
 def summary(cur, filters):
@@ -435,7 +422,8 @@ def dashboard():
             total_pages = max(1, math.ceil(stats['total'] / per_page))
             page = max(1, min(request.args.get('page', 1, type=int) or 1, total_pages))
             trend = trend_series(cur, filters)
-            hourly = hourly_series(cur, filters)
+            h_dates = hourly_dates(cur, filters)
+            hourly_initial = hourly_for_date(cur, h_dates[0]) if h_dates else None
             ips = top_ip_codes(cur, filters)
             rows = log_page(cur, filters, page, per_page)
         base_args = filters.params(per_page=per_page)
@@ -450,7 +438,9 @@ def dashboard():
             trend_length = len(trend)
         return render_template(
             'dashboard.html', filters=filters, stats=stats, trend=trend,
-            trend_length=trend_length, hourly=hourly,
+            trend_length=trend_length,
+            hourly_dates=[d.isoformat() for d in h_dates],
+            hourly_initial=hourly_initial,
             ips=ips, rows=rows, page=page, page_links=page_links, total_pages=total_pages,
             per_page=per_page, per_page_options=PER_PAGE_OPTIONS,
             page_start=(page - 1) * per_page + 1 if stats['total'] else 0,
@@ -465,6 +455,25 @@ def dashboard():
         return render_template('error.html', message=str(exc), details=''), 400
     except (pyodbc.Error, TimeoutError) as exc:
         return respond_db_error(exc)
+
+
+@app.get('/api/hourly')
+@optional_basic_auth
+def api_hourly():
+    """Return hourly print counts for a single date (AJAX endpoint)."""
+    try:
+        d = parse_date(request.args.get('date', '').strip())
+        if not d:
+            return jsonify({'error': 'Parameter date wajib diisi.'}), 400
+        with connected() as conn:
+            cur = conn.cursor()
+            data = hourly_for_date(cur, d)
+        return jsonify(data)
+    except ValueError as exc:
+        return jsonify({'error': str(exc)}), 400
+    except (pyodbc.Error, TimeoutError):
+        app.logger.exception('Hourly query failed')
+        return jsonify({'error': 'SQL Server tidak dapat memproses permintaan.'}), 503
 
 
 @app.get('/api/ip-codes')

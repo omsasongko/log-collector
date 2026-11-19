@@ -90,9 +90,11 @@
         </article>
       </section>
 
-      <section class="card hourly-card">
-        <div class="section-top chart-heading"><div><div class="section-kicker">HOURLY DISTRIBUTION</div><h2>Print per Jam</h2><p>Distribusi jumlah print berdasarkan jam (00–23) pada filter terpilih.</p></div><div class="chart-legends">{% if filters.shift == 'all' %}<span class="chart-legend"><span class="legend-circle shift1-color"></span> Shift 1 (00–08)</span><span class="chart-legend"><span class="legend-circle shift2-color"></span> Shift 2 (08–16)</span><span class="chart-legend"><span class="legend-circle shift3-color"></span> Shift 3 (16–24)</span>{% else %}<span class="chart-legend"><span class="legend-circle shift{{ filters.shift }}-color"></span> {{ 'Shift 1 (00–08)' if filters.shift=='1' else 'Shift 2 (08–16)' if filters.shift=='2' else 'Shift 3 (16–24)' }}</span>{% endif %}</div></div>
-        <div class="hourly-wrap" id="hourlyContainer" data-hourly="{{ hourly | tojson | forceescape }}" data-shift="{{ filters.shift }}"><svg id="hourlyChart" viewBox="0 0 900 260" preserveAspectRatio="none" role="img" aria-label="Grafik distribusi print per jam"></svg><div class="chart-empty" id="hourlyEmpty" hidden>Tidak ada data pada filter ini.</div></div>
+      <section class="card hourly-card" id="hourlySection" data-api="{{ url_for('api_hourly') }}" data-dates="{{ hourly_dates | tojson | forceescape }}" data-initial="{{ hourly_initial | tojson | forceescape if hourly_initial else '{}' }}">
+        <div class="section-top chart-heading"><div><div class="section-kicker">HOURLY DISTRIBUTION</div><h2>Hourly Print Analysis</h2><p class="hourly-hint">Pilih tanggal untuk melihat aktivitas per jam</p></div>{% if hourly_dates %}<select id="hourlyDatePicker" class="hourly-date-select">{% for d in hourly_dates %}<option value="{{ d }}"{% if loop.first %} selected{% endif %}>{{ d }}</option>{% endfor %}</select>{% endif %}</div>
+        <div class="hourly-wrap" id="hourlyContainer"><svg id="hourlyChart" viewBox="0 0 900 280" preserveAspectRatio="none" role="img" aria-label="Grafik distribusi print per jam"></svg><div class="chart-empty" id="hourlyEmpty"{% if hourly_initial %} hidden{% endif %}>Tidak ada data pada filter ini.</div></div>
+        <div class="hourly-legend"><span class="legend-circle hourly-dot"></span> Print per jam</div>
+        <div class="hourly-stats" id="hourlyStats">{% if hourly_initial %}<div class="hourly-stat"><span class="hourly-stat-label">Peak Hour</span><span class="hourly-stat-value" id="peakHour">{{ hourly_initial.peak_hour }}</span></div><div class="hourly-stat"><span class="hourly-stat-label">Print pada jam tersibuk</span><span class="hourly-stat-value" id="peakCount">{{ '{:,}'.format(hourly_initial.peak_count) }}</span></div>{% endif %}</div>
       </section>
 
       <section class="card table-card" id="log-records">
