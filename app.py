@@ -325,6 +325,49 @@ def trend_series(cur, filters):
         return _build_date_buckets(filters, by_date)
 
 
+def hourly_series(cur, filters):
+    """Return print count per hour (0–23) for the hourly distribution chart."""
+    where, params = filters.conditions()
+    prefix = ' AND ' if where else ' WHERE '
+
+    if filters.shift == 'all':
+        # All shifts: return {'1': [...], '2': [...], '3': [...]}
+        query(cur, f'''
+            SELECT DATEPART(HOUR, LogDateTime) AS H,
+                   CASE WHEN DATEPART(HOUR, LogDateTime) BETWEEN 0  AND 7  THEN 1
+                        WHEN DATEPART(HOUR, LogDateTime) BETWEEN 8  AND 15 THEN 2
+                        ELSE 3 END AS ShiftNum,
+                   COUNT_BIG(*) AS PrintCount
+            FROM dbo.vAllLogEntries
+            {where}{prefix}LogDateTime IS NOT NULL
+            GROUP BY DATEPART(HOUR, LogDateTime),
+                     CASE WHEN DATEPART(HOUR, LogDateTime) BETWEEN 0  AND 7  THEN 1
+                          WHEN DATEPART(HOUR, LogDateTime) BETWEEN 8  AND 15 THEN 2
+                          ELSE 3 END
+            ORDER BY H ASC
+        ''', params, timeout=120)
+        maps = {'1': {}, '2': {}, '3': {}}
+        for row in cur.fetchall():
+            maps[str(int(row[1]))][int(row[0])] = int(row[2])
+        result = {}
+        for sk, (lo, hi) in SHIFT_RANGES.items():
+            result[sk] = [{'hour': h, 'label': f'{h:02d}:00', 'count': maps[sk].get(h, 0)} for h in range(lo, hi + 1)]
+        return result
+    else:
+        # Single shift
+        lo, hi = SHIFT_RANGES[filters.shift]
+        shift_cond = _shift_hour_cond(filters.shift)
+        query(cur, f'''
+            SELECT DATEPART(HOUR, LogDateTime) AS H, COUNT_BIG(*) AS PrintCount
+            FROM dbo.vAllLogEntries
+            {where}{prefix}LogDateTime IS NOT NULL AND {shift_cond}
+            GROUP BY DATEPART(HOUR, LogDateTime)
+            ORDER BY H ASC
+        ''', params, timeout=120)
+        by_hour = {int(r[0]): int(r[1]) for r in cur.fetchall()}
+        return [{'hour': h, 'label': f'{h:02d}:00', 'count': by_hour.get(h, 0)} for h in range(lo, hi + 1)]
+
+
 def summary(cur, filters):
     where, params = filters.conditions()
     query(cur, f'''
@@ -392,6 +435,7 @@ def dashboard():
             total_pages = max(1, math.ceil(stats['total'] / per_page))
             page = max(1, min(request.args.get('page', 1, type=int) or 1, total_pages))
             trend = trend_series(cur, filters)
+            hourly = hourly_series(cur, filters)
             ips = top_ip_codes(cur, filters)
             rows = log_page(cur, filters, page, per_page)
         base_args = filters.params(per_page=per_page)
@@ -406,7 +450,7 @@ def dashboard():
             trend_length = len(trend)
         return render_template(
             'dashboard.html', filters=filters, stats=stats, trend=trend,
-            trend_length=trend_length,
+            trend_length=trend_length, hourly=hourly,
             ips=ips, rows=rows, page=page, page_links=page_links, total_pages=total_pages,
             per_page=per_page, per_page_options=PER_PAGE_OPTIONS,
             page_start=(page - 1) * per_page + 1 if stats['total'] else 0,

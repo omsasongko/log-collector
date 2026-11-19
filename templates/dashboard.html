@@ -90,6 +90,11 @@
         </article>
       </section>
 
+      <section class="card hourly-card">
+        <div class="section-top chart-heading"><div><div class="section-kicker">HOURLY DISTRIBUTION</div><h2>Print per Jam</h2><p>Distribusi jumlah print berdasarkan jam (00–23) pada filter terpilih.</p></div><div class="chart-legends">{% if filters.shift == 'all' %}<span class="chart-legend"><span class="legend-circle shift1-color"></span> Shift 1 (00–08)</span><span class="chart-legend"><span class="legend-circle shift2-color"></span> Shift 2 (08–16)</span><span class="chart-legend"><span class="legend-circle shift3-color"></span> Shift 3 (16–24)</span>{% else %}<span class="chart-legend"><span class="legend-circle shift{{ filters.shift }}-color"></span> {{ 'Shift 1 (00–08)' if filters.shift=='1' else 'Shift 2 (08–16)' if filters.shift=='2' else 'Shift 3 (16–24)' }}</span>{% endif %}</div></div>
+        <div class="hourly-wrap" id="hourlyContainer" data-hourly="{{ hourly | tojson | forceescape }}" data-shift="{{ filters.shift }}"><svg id="hourlyChart" viewBox="0 0 900 260" preserveAspectRatio="none" role="img" aria-label="Grafik distribusi print per jam"></svg><div class="chart-empty" id="hourlyEmpty" hidden>Tidak ada data pada filter ini.</div></div>
+      </section>
+
       <section class="card table-card" id="log-records">
         <div class="section-top table-head"><div><div class="section-kicker">DETAILED HISTORY</div><h2>Print Log Records</h2><p>Seluruh record dapat diakses melalui pagination, {{ per_page }} baris per halaman.</p></div><div class="table-head-right"><span class="page-count">{{ '{:,}'.format(stats.total) }} records</span><a class="button button-secondary small-export" href="{{ export_link }}"><svg viewBox="0 0 24 24"><path d="M12 3v12m0 0 5-5m-5 5-5-5M4 17v3h16v-3"/></svg> Excel</a></div></div>
         <div class="table-scroll">
