@@ -1,0 +1,126 @@
+<!doctype html>
+<html lang="id">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light">
+  <title>PCS Print Insights — Log Monitoring</title>
+  <link rel="icon" href="{{ url_for('static', filename='favicon.svg') }}" type="image/svg+xml">
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+  <script src="{{ url_for('static', filename='app.js') }}" defer></script>
+</head>
+<body>
+<div class="shell">
+  <aside class="sidebar" id="sidebar">
+    <a class="logo" href="{{ url_for('dashboard') }}" aria-label="PCS Print Insights home">
+      <span class="logo-mark"><svg viewBox="0 0 24 24" width="25" height="25" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="4" y="7" width="16" height="12" rx="2"/><path d="M8 7V4h8v3M8 15h8M8 19v2h8v-2M7 11h.01" stroke-linecap="round"/></svg></span>
+      <span><strong>PCS<span>Print</span></strong><small>Analytics Platform</small></span>
+    </a>
+    <div class="side-divider"></div>
+    <div class="nav-label">WORKSPACE</div>
+    <nav class="side-nav" aria-label="Navigasi dashboard">
+      <a class="nav-link active" href="#overview"><svg viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg> Overview</a>
+      <a class="nav-link" href="#print-trend"><svg viewBox="0 0 24 24"><path d="M3 18l5-7 4 3 5-8 4 3"/><path d="M3 21h18"/></svg> Print Analytics</a>
+      <a class="nav-link" href="#log-records"><svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 10h18M8 4v16"/></svg> Log Records</a>
+    </nav>
+    <div class="sidebar-bottom">
+      <div class="edition">PCS PRINT INSIGHTS <span>v1.0</span></div>
+    </div>
+  </aside>
+  <div class="backdrop" id="backdrop"></div>
+
+  <div class="work-area">
+    <header class="topbar">
+      <div class="topbar-left">
+        <button type="button" class="menu-btn" id="menuBtn" aria-label="Buka menu"><svg viewBox="0 0 24 24"><path d="M4 7h16M4 12h16M4 17h16"/></svg></button>
+        <span class="breadcrumb">Workspace <span>/</span> <strong>Print Overview</strong></span>
+      </div>
+      <div class="topbar-right"><span class="connection-pill"><span class="pulse"></span> Database connected</span><span class="top-divider"></span><span class="avatar" aria-label="Administrator">IT</span></div>
+    </header>
+
+    <main class="content" id="overview">
+      <div class="page-head">
+        <div><div class="eyebrow"><span class="eyebrow-dot"></span> LIVE DATABASE REPORT</div><h1>Print Log Overview</h1><p>Monitoring histori pencetakan dari PCS berdasarkan <b>Date Printed</b>, <b>IP CODE</b> dan <b>UNIQUE CODE</b>.</p></div>
+        <a class="button button-primary export-button" href="{{ export_link }}" title="Maksimum {{ '{:,}'.format(excel_max) }} record per file"><svg viewBox="0 0 24 24"><path d="M12 3v12m0 0 5-5m-5 5-5-5M4 17v3h16v-3"/></svg><span>Export Excel</span></a>
+      </div>
+
+      <section class="card filters-card" aria-labelledby="filters-title">
+        <div class="section-top"><div><h2 id="filters-title">Filter &amp; Analysis</h2><p>Sesuaikan periode dan kode untuk menganalisis data print.</p></div><a href="{{ url_for('dashboard', range='all') }}" class="subtle-link">Reset semua filter <span aria-hidden="true">↗</span></a></div>
+        <form action="{{ url_for('dashboard') }}" method="get" id="filterForm" class="filter-grid">
+          <div class="field field-range"><label for="range">Quick Range</label><select name="range" id="range"><option value="1" {% if filters.range_mode=='1' %}selected{% endif %}>Kemarin</option><option value="7" {% if filters.range_mode=='7' %}selected{% endif %}>7 hari terakhir</option><option value="all" {% if filters.range_mode=='all' %}selected{% endif %}>Semua histori</option><option value="custom" {% if filters.range_mode=='custom' %}selected{% endif %}>Custom date range</option></select></div>
+          <div class="field"><label for="date_from_display">From Date <span class="date-format">(dd/mm/yyyy)</span></label><div class="date-input-wrap"><input type="date" id="date_from" name="date_from" class="date-native" value="{{ filters.date_from.isoformat() if filters.date_from else '' }}"><input type="text" id="date_from_display" class="date-input" placeholder="dd/mm/yyyy" value="{{ filters.date_from.strftime('%d/%m/%Y') if filters.date_from else '' }}" readonly></div></div>
+          <div class="field"><label for="date_to_display">To Date <span class="date-format">(dd/mm/yyyy)</span></label><div class="date-input-wrap"><input type="date" id="date_to" name="date_to" class="date-native" value="{{ filters.date_to.isoformat() if filters.date_to else '' }}"><input type="text" id="date_to_display" class="date-input" placeholder="dd/mm/yyyy" value="{{ filters.date_to.strftime('%d/%m/%Y') if filters.date_to else '' }}" readonly></div></div>
+          <div class="field"><label for="ip_code">IP CODE</label><input id="ip_code" name="ip_code" value="{{ filters.ip_code }}" placeholder="Contoh: 29028" maxlength="50"></div>
+          <div class="field"><label for="unique_code">UNIQUE CODE</label><input id="unique_code" name="unique_code" value="{{ filters.unique_code }}" placeholder="Contoh: GG591" maxlength="100"></div>
+          <div class="field"><label for="per_page">Rows per page</label><select name="per_page" id="per_page">{% for opt in per_page_options %}<option value="{{ opt }}" {% if per_page==opt %}selected{% endif %}>{{ opt }} rows</option>{% endfor %}</select></div>
+          <div class="filter-actions"><button class="button button-primary" type="submit"><svg viewBox="0 0 24 24"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m16 16 5 5"/></svg> Apply Filters</button></div>
+        </form>
+        <p class="filter-hint">Pencarian IP CODE dan UNIQUE CODE berdasarkan awalan; tanggal menggunakan Date Printed, bukan waktu import ke SQL Server.</p>
+      </section>
+
+      <section class="stats" aria-label="Ringkasan statistik">
+        <article class="stat-card feature-stat"><div class="stat-icon featured"><svg viewBox="0 0 24 24"><path d="M4 18V9m5 9V5m5 13v-7m5 7V3"/></svg></div><div class="stat-title">Total Print Logs</div><div class="stat-number">{{ '{:,}'.format(stats.total) }}</div><div class="stat-footer">Record sesuai filter terpilih</div><span class="stat-watermark">↗</span></article>
+        <article class="stat-card"><div class="stat-icon lavender"><svg viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="16" rx="3"/><path d="M8 9h8M8 13h5M8 17h8"/></svg></div><div class="stat-title">Distinct IP CODE</div><div class="stat-number">{{ '{:,}'.format(stats.unique_ip) }}</div><div class="stat-footer">Kode berbeda dalam filter</div></article>
+        <article class="stat-card"><div class="stat-icon blue"><svg viewBox="0 0 24 24"><path d="M5 3v3M19 3v3M3 9h18M5 4h14a2 2 0 0 1 2 2v13a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2Z"/><path d="M8 13h3m-3 4h7"/></svg></div><div class="stat-title">Periode Grafik</div><div class="stat-number period-stat">{% if filters.period == 'day' %}Daily{% elif filters.period == 'week' %}Weekly{% else %}Monthly{% endif %}</div><div class="stat-footer">{{ trend|length }} periode pada grafik</div></article>
+        <article class="stat-card"><div class="stat-icon green"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3.5 2"/></svg></div><div class="stat-title">Last Date Printed</div><div class="stat-number last-stat">{{ stats.last_printed.split(',')[0] if stats.last_printed != '—' else '—' }}</div><div class="stat-footer">{{ stats.last_printed.split(', ')[1] if ', ' in stats.last_printed else 'Tidak ada data' }}</div></article>
+      </section>
+
+      <section class="charts-grid" id="print-trend">
+        <article class="card chart-panel">
+          <div class="section-top chart-heading"><div><div class="section-kicker">PRINT ACTIVITY</div><h2>Print Frequency Trend</h2><p>Jumlah baris log per {{ 'hari' if filters.period=='day' else 'minggu' if filters.period=='week' else 'bulan' }}.</p></div><span class="chart-legend"><span class="legend-circle"></span> Total prints</span></div>
+          <div class="trend-wrap" id="trendContainer" data-trend="{{ trend | tojson | forceescape }}"><svg id="trendChart" viewBox="0 0 900 320" preserveAspectRatio="none" role="img" aria-label="Grafik jumlah print menurut tanggal"></svg><div class="chart-empty" id="trendEmpty" hidden>Tidak ada data Date Printed dalam filter ini.</div></div>
+          <div class="chart-note"><svg viewBox="0 0 24 24"><path d="M12 16v-5m0-3h.01"/><circle cx="12" cy="12" r="10"/></svg> Klik titik grafik untuk memilih periode dan melihat IP CODE yang diprint.</div>
+        </article>
+        <article class="card ip-panel">
+          <div class="section-top chart-heading"><div><div class="section-kicker">CODE BREAKDOWN</div><h2>Top IP CODE</h2><p>IP CODE paling sering tercetak pada periode terpilih.</p></div><span class="top-count">Top 10</span></div>
+          <div class="ip-bars" id="ipBars">
+            {% if ips %}
+              {% set maximum = ips[0].count %}
+              {% for ip in ips %}
+              <button type="button" class="ip-row" data-ip="{{ ip.code }}" title="Filter IP CODE {{ ip.code }}">
+                <span class="ip-name">{{ ip.code }}</span><span class="ip-track"><progress max="{{ maximum }}" value="{{ ip.count }}"></progress></span><span class="ip-count">{{ '{:,}'.format(ip.count) }}</span>
+              </button>
+              {% endfor %}
+            {% else %}
+              <div class="empty-panel">Tidak ada IP CODE dalam filter.</div>
+            {% endif %}
+          </div>
+          <button type="button" class="view-all" id="openIpModal">Lihat semua IP CODE &amp; jumlah print <span aria-hidden="true">→</span></button>
+        </article>
+      </section>
+
+      <section class="card table-card" id="log-records">
+        <div class="section-top table-head"><div><div class="section-kicker">DETAILED HISTORY</div><h2>Print Log Records</h2><p>Seluruh record dapat diakses melalui pagination, {{ per_page }} baris per halaman.</p></div><div class="table-head-right"><span class="page-count">{{ '{:,}'.format(stats.total) }} records</span><a class="button button-secondary small-export" href="{{ export_link }}"><svg viewBox="0 0 24 24"><path d="M12 3v12m0 0 5-5m-5 5-5-5M4 17v3h16v-3"/></svg> Excel</a></div></div>
+        <div class="table-scroll">
+          <table><thead><tr><th class="col-no">No.</th><th>Date Printed</th><th>IP CODE</th><th>UNIQUE CODE</th><th>Raw Data</th></tr></thead>
+          <tbody>
+          {% for row in rows %}
+          <tr><td class="col-no">{{ '{:,}'.format(row.no) }}</td><td><span class="date-cell">{{ row.date_printed }}</span></td><td><span class="code-chip ip-chip">{{ row.ip_code }}</span></td><td><span class="code-chip unique-chip">{{ row.unique_code }}</span></td><td class="raw-cell" title="{{ row.raw }}">{{ row.raw }}</td></tr>
+          {% else %}
+          <tr><td colspan="5"><div class="table-empty">Tidak ada record sesuai filter yang dipilih.</div></td></tr>
+          {% endfor %}
+          </tbody></table>
+        </div>
+        <footer class="table-footer"><div class="showing">Showing <strong>{{ '{:,}'.format(page_start) }}–{{ '{:,}'.format(page_end) }}</strong> of <strong>{{ '{:,}'.format(stats.total) }}</strong> records</div>
+        <nav class="pagination" aria-label="Navigasi halaman record">
+          {% if previous %}<a href="{{ previous }}" aria-label="Halaman sebelumnya">‹</a>{% else %}<span class="disabled">‹</span>{% endif %}
+          {% for item in page_links %}<a href="{{ item.url }}" class="{% if item.active %}current{% endif %}">{{ '{:,}'.format(item.number) }}</a>{% endfor %}
+          {% if next_page %}<a href="{{ next_page }}" aria-label="Halaman selanjutnya">›</a>{% else %}<span class="disabled">›</span>{% endif %}
+        </nav></footer>
+      </section>
+
+      <footer class="main-footer"><span>PCS Print Insights • Data dari dbo.vAllLogEntries</span><span>Satu baris LOG dihitung sebagai satu kejadian print; validasi makna event sesuai aplikasi PCS.</span></footer>
+    </main>
+  </div>
+</div>
+
+<div class="modal-cover" id="ipModal" hidden>
+  <div class="modal" role="dialog" aria-modal="true" aria-labelledby="ipModalTitle">
+    <div class="modal-head"><div><div class="section-kicker">FULL BREAKDOWN</div><h2 id="ipModalTitle">Semua IP CODE</h2><p>Jumlah print per IP CODE untuk filter yang aktif.</p></div><button type="button" class="modal-close" id="closeIpModal" aria-label="Tutup">×</button></div>
+    <div class="modal-body"><div id="ipModalStatus">Memuat data…</div><table class="breakdown-table" aria-label="Semua IP CODE"><thead><tr><th>IP CODE</th><th>Total Print</th><th></th></tr></thead><tbody id="ipModalBody"></tbody></table></div>
+    <div class="modal-footer"><button type="button" class="button button-secondary" id="ipPrevious">← Previous</button><span id="ipPagination"></span><button type="button" class="button button-secondary" id="ipNext">Next →</button></div>
+  </div>
+</div>
+<div id="dashboardConfig" data-api="{{ url_for('ip_code_breakdown') }}" data-query="{{ query_params | tojson | forceescape }}"></div>
+</body>
+</html>
