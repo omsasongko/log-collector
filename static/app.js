@@ -152,7 +152,7 @@
       const ld=pts.map(([px,py],i)=>`${i?'L':'M'}${px.toFixed(1)},${py.toFixed(1)}`).join('');
       hSvg.append(he('path',{d:`${ld}L${pts[23][0].toFixed(1)},${(T+ph).toFixed(1)}L${pts[0][0].toFixed(1)},${(T+ph).toFixed(1)}Z`,class:'h-area',fill:'url(#hGradB)'}));
       hSvg.append(he('path',{d:ld,class:'h-line'}));
-      s.forEach((p,i)=>{const[px,py]=pts[i];const c=he('circle',{cx:px,cy:py,r:2.5,class:'h-point'});c.append(he('title',{},`${p.label}\n${Number(p.count).toLocaleString()} prints`));hSvg.append(c);});
+      s.forEach((p,i)=>{const[px,py]=pts[i];const c=he('circle',{cx:px,cy:py,r:2,class:'h-point'});c.append(he('title',{},`${p.label}\n${Number(p.count).toLocaleString()} prints`));hSvg.append(c);});
       const ph2=$('peakHour'),pc=$('peakCount'),st=$('hourlyStats');
       if(ph2)ph2.textContent=data.peak_hour||'—';
       if(pc)pc.textContent=Number(data.peak_count||0).toLocaleString();
